@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="icon" href="data:,">
+<title>IRONHOLD — Foundry Yard | Tactical FPS</title>
+<style>
+  /* IRONHOLD HUD: flat industrial palette, amber = you, crimson = Wardens. */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #101216; }
+  body { font-family: "Segoe UI", system-ui, sans-serif; color: #e8e4d8; }
+  #app { position: fixed; inset: 0; }
+  canvas { display: block; width: 100%; height: 100%; }
+  .hidden { display: none !important; }
+  /* Crosshair: four bars + dot; --sp spreads the bars with weapon bloom. */
+  #crosshair { position: absolute; left: 50%; top: 50%; width: 0; height: 0; pointer-events: none; z-index: 5; }
+  #crosshair .bar { position: absolute; background: #ffd23e; box-shadow: 0 0 2px #000; }
+  #crosshair .t { left: -1px; top: calc(-10px - var(--sp, 0px)); width: 2px; height: 7px; }
+  #crosshair .b { left: -1px; top: calc(3px + var(--sp, 0px)); width: 2px; height: 7px; }
+  #crosshair .l { top: -1px; left: calc(-10px - var(--sp, 0px)); width: 7px; height: 2px; }
+  #crosshair .r { top: -1px; left: calc(3px + var(--sp, 0px)); width: 7px; height: 2px; }
+  #crosshair .dot { left: -1.5px; top: -1.5px; width: 3px; height: 3px; border-radius: 50%; }
+  #hitmarker { position: absolute; left: 50%; top: 50%; width: 26px; height: 26px; margin: -13px 0 0 -13px; pointer-events: none; z-index: 6; opacity: 0; }
+  #hitmarker::before, #hitmarker::after { content: ""; position: absolute; left: 12px; top: 0; width: 2px; height: 26px; background: #fff; transform: rotate(45deg); }
+  #hitmarker::after { transform: rotate(-45deg); }
+  #hitmarker.kill::before, #hitmarker.kill::after { background: #ff5340; }
+  #hitmarker.show { opacity: 1; }
+  /* Bottom-left: health + armor. Bottom-right: ammo. Top-center: timer + score. */
+  #hud { position: absolute; inset: 0; pointer-events: none; z-index: 4; font-weight: 600; }
+  .panel { background: rgba(12, 14, 18, 0.72); border: 1px solid rgba(255, 210, 62, 0.35); border-radius: 4px; padding: 8px 12px; }
+  #vitals { position: absolute; left: 18px; bottom: 18px; min-width: 210px; }
+  #vitals .hpnum { font-size: 30px; line-height: 1; color: #ffd23e; }
+  #vitals .hplabel { font-size: 11px; letter-spacing: 2px; color: #9a958a; }
+  #hpbar { height: 8px; background: #2a2d33; margin-top: 6px; border-radius: 2px; overflow: hidden; }
+  #hpfill { height: 100%; width: 100%; background: #e8b93c; }
+  #armorline { font-size: 12px; color: #7fb7d9; margin-top: 4px; }
+  #ammo { position: absolute; right: 18px; bottom: 18px; text-align: right; min-width: 150px; }
+  #ammo .mag { font-size: 30px; line-height: 1; color: #ffd23e; }
+  #ammo .res { font-size: 15px; color: #9a958a; }
+  #ammo .wname { font-size: 12px; letter-spacing: 1px; color: #cfc9b8; margin-top: 2px; }
+  #topbar { position: absolute; left: 50%; top: 14px; transform: translateX(-50%); text-align: center; }
+  #timer { font-size: 26px; color: #fff; }
+  #timer.low { color: #ff5340; }
+  #score { font-size: 14px; letter-spacing: 1px; margin-top: 2px; }
+  #score .you { color: #ffd23e; } #score .foe { color: #ff5340; }
+  #roundlabel { font-size: 11px; letter-spacing: 3px; color: #9a958a; }
+  #money { position: absolute; left: 18px; top: 14px; font-size: 16px; color: #8fd18f; }
+  #money .hint { display: block; font-size: 11px; color: #9a958a; letter-spacing: 1px; }
+  #bombstatus { position: absolute; right: 18px; top: 14px; text-align: right; font-size: 13px; color: #ffb199; }
+  #bombstatus .planted { color: #ff5340; font-size: 16px; }
+  #killfeed { position: absolute; right: 18px; top: 74px; text-align: right; font-size: 13px; line-height: 1.7; }
+  #killfeed div { text-shadow: 0 1px 2px #000; }
+  #killfeed .you { color: #ffd23e; } #killfeed .foe { color: #ff8a7a; }
+  #center { position: absolute; left: 50%; top: 26%; transform: translateX(-50%); text-align: center; width: 640px; pointer-events: none; }
+  #centermsg { font-size: 26px; letter-spacing: 2px; text-shadow: 0 2px 6px #000; }
+  #centersub { font-size: 14px; color: #cfc9b8; margin-top: 6px; text-shadow: 0 1px 4px #000; }
+  #progress { width: 260px; height: 10px; margin: 12px auto 0; background: #2a2d33; border: 1px solid #555; display: none; }
+  #progressfill { height: 100%; width: 0%; background: #ffd23e; }
+  #progresstext { font-size: 12px; letter-spacing: 2px; margin-top: 5px; color: #ffd23e; }
+  #damage { position: absolute; inset: 0; pointer-events: none; z-index: 3; opacity: 0;
+    background: radial-gradient(ellipse at center, transparent 55%, rgba(255, 30, 10, 0.55) 100%); }
+  #vignette { position: absolute; inset: 0; pointer-events: none; z-index: 2;
+    background: radial-gradient(ellipse at center, transparent 62%, rgba(0, 0, 0, 0.45) 100%); }
+  /* Buy menu (B during the buy phase). */
+  #buy { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 620px; z-index: 8;
+    background: rgba(10, 12, 15, 0.94); border: 1px solid #ffd23e; border-radius: 6px; padding: 18px 20px; pointer-events: auto; }
+  #buy h2 { font-size: 18px; letter-spacing: 3px; color: #ffd23e; }
+  #buy .bal { float: right; color: #8fd18f; font-size: 16px; }
+  #buy .items { margin-top: 12px; }
+  #buy .item { display: flex; justify-content: space-between; padding: 7px 8px; border-bottom: 1px solid #26292f; font-size: 14px; cursor: pointer; }
+  #buy .item:hover { background: #1d2126; }
+  #buy .item .key { color: #ffd23e; width: 22px; display: inline-block; }
+  #buy .item .price { color: #8fd18f; }
+  #buy .item.owned { color: #7d8894; } #buy .item.owned .price { color: #7d8894; }
+  #buy .item.cant { color: #6b4a44; } #buy .item.cant .price { color: #6b4a44; }
+  #buy .note { margin-top: 10px; font-size: 12px; color: #9a958a; }
+  /* Full-screen overlays: menu, round end, match end, paused. */
+  .overlay { position: absolute; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    background: rgba(8, 10, 13, 0.82); text-align: center; }
+  .overlay h1 { font-size: 54px; letter-spacing: 10px; color: #ffd23e; text-shadow: 0 0 24px rgba(255, 210, 62, 0.35); }
+  .overlay h2 { font-size: 30px; letter-spacing: 4px; }
+  .overlay h2.win { color: #8fd18f; } .overlay h2.lose { color: #ff5340; }
+  .overlay p { max-width: 620px; margin-top: 14px; font-size: 15px; line-height: 1.7; color: #cfc9b8; }
+  .overlay .keys { font-size: 13px; color: #9a958a; margin-top: 10px; line-height: 1.9; }
+  .overlay .keys b { color: #e8e4d8; }
+  .bigbtn { margin-top: 24px; padding: 13px 34px; font-size: 17px; letter-spacing: 2px; font-weight: 700; color: #141414;
+    background: #ffd23e; border: none; border-radius: 4px; cursor: pointer; pointer-events: auto; }
+  .bigbtn:hover { background: #ffe27a; }
+  #pausemsg { position: absolute; left: 50%; top: 44%; transform: translateX(-50%); z-index: 9; font-size: 18px;
+    letter-spacing: 2px; text-shadow: 0 2px 6px #000; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="vignette"></div>
+  <div id="damage"></div>
+  <div id="hud" class="hidden">
+    <div id="crosshair"><div class="bar t"></div><div class="bar b"></div><div class="bar l"></div><div class="bar r"></div><div class="bar dot"></div></div>
+    <div id="hitmarker"></div>
+    <div id="vitals" class="panel"><div class="hplabel">HEALTH</div><div class="hpnum" id="hpnum">100</div><div id="hpbar"><div id="hpfill"></div></div><div id="armorline">ARMOR 0</div></div>
+    <div id="ammo" class="panel"><span class="mag" id="mag">15</span> <span class="res" id="reserve">/ 75</span><div class="wname" id="wname">P9 SIDEARM</div></div>
+    <div id="topbar"><div id="roundlabel">ROUND 1 · FIRST TO 5</div><div id="timer">1:40</div><div id="score"><span class="you">VANGUARD 0</span> — <span class="foe">0 WARDENS</span></div></div>
+    <div id="money" class="panel">$800<span class="hint">B — BUY MENU</span></div>
+    <div id="bombstatus"></div>
+    <div id="killfeed"></div>
+    <div id="center"><div id="centermsg"></div><div id="centersub"></div><div id="progress"><div id="progressfill"></div></div><div id="progresstext"></div></div>
+  </div>
+  <div id="buy" class="hidden"><h2>BUY MENU <span class="bal" id="buybal">$800</span></h2><div class="items" id="buyitems"></div><div class="note">Keys 1–9 buy · B or DEPLOY closes · buys only work in the buy phase · money carries between rounds.</div><button class="bigbtn" id="deploybtn" style="margin-top:14px">DEPLOY</button></div>
+  <div id="pausemsg" class="hidden">CLICK TO RESUME — POINTER UNLOCKED</div>
+  <div id="menu" class="overlay">
+    <h1>IRONHOLD</h1>
+    <p><b>Foundry Yard</b> — a round-based tactical shooter. You are the Vanguard attacker, alone against four
+    Warden defenders. Plant the charge at <b>Furnace (A)</b> or <b>Depot (B)</b>, or eliminate the whole squad.
+    Win the round, earn money, buy better guns. First to 5 rounds takes the match.</p>
+    <div class="keys"><b>WASD</b> move · <b>Mouse</b> aim · <b>Click</b> fire · <b>R</b> reload · <b>Shift</b> walk slow &amp; steady ·
+    <b>C / Ctrl</b> crouch · <b>1 / 2</b> weapons · <b>3 / 4</b> grenades · <b>B</b> buy menu · <b>E</b> plant (hold, on site)</div>
+    <button class="bigbtn" id="startbtn">CLICK TO DEPLOY</button>
+    <p style="font-size:12px;color:#7d8894">Runs fully offline — no network, no downloads. Sound is synthesized live.</p>
+  </div>
+  <div id="roundend" class="overlay hidden"><h2 id="roundtitle">ROUND WON</h2><p id="roundreason"></p><p id="roundscore" style="color:#ffd23e"></p></div>
+  <div id="matchend" class="overlay hidden"><h2 id="matchtitle">VICTORY</h2><p id="matchscore"></p><button class="bigbtn" id="againbtn">PLAY AGAIN</button></div>
+</div>
+<script type="importmap">
+{ "imports": { "three": "./vendor/three/three.module.min.js" } }
+</script>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
